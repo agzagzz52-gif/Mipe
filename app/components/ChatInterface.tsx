@@ -9,7 +9,8 @@ type Message = {
     role: "user" | "assistant";
     content: string;
     type?: "text" | "ui";
-    component?: React.ReactNode;
+    options?: (WizardTask | WizardOption)[];
+    optionType?: "task" | "time" | "team" | "budget";
     timestamp: Date;
 };
 
@@ -47,105 +48,112 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
         if (messages.length > 0) return;
 
         if (initialContext) {
-            // 1. Initial Prompt (Spanish)
-            const formattedModule = initialContext.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-            const initialContent = `Has seleccionado **${formattedModule}**. Excelente elección. Soy tu consultor MIPE y voy a ayudarte a estructurar este proyecto y haremos tu plan estratégico.`;
-
             setConfig(prev => ({ ...prev, module: initialContext }));
 
-            const initMessages: Message[] = [
-                { id: "welcome", role: "assistant", content: initialContent, timestamp: new Date(), type: "text" }
-            ];
-            setMessages(initMessages);
-
-            // Trigger Step A: Task Selection
+            // Start immediately with Step A
             setTimeout(() => {
                 triggerStep("TASK", initialContext);
-            }, 1500);
+            }, 500);
         }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // STATE MACHINE TRIGGER
-    const triggerStep = (step: WizardStep, context?: string) => {
+    // PROMPT GENERATOR
+    const triggerStep = (step: WizardStep, contextData?: string) => {
         setWizardStep(step);
         setIsTyping(true);
 
+        const delay = step === "TASK" ? 400 : 600;
+
         setTimeout(() => {
-            let promptText = "";
-            let options: (WizardTask | WizardOption)[] = [];
-            let optionType: "task" | "time" | "team" | "budget" | undefined;
+            try {
+                let promptText = "";
+                let options: (WizardTask | WizardOption)[] = [];
+                let optionType: "task" | "time" | "team" | "budget" | undefined;
 
-            switch (step) {
-                case "TASK":
-                    promptText = `He investigado las tendencias actuales. Aquí tienes las 10 tareas más comunes para Microempresas (PyMEs) dentro de **${context || config.module}**. ¿Alguna se ajusta a tu necesidad?`;
-                    const key = (context || config.module || "default").toLowerCase().includes("data") ? "data-analytics"
-                        : (context || config.module || "default").toLowerCase().includes("ai") ? "ai"
-                            : "default";
-                    options = COMMON_TASKS[key] || COMMON_TASKS["default"];
-                    // Add "Own Need" Option Logic is handled by the component rendering usually, or we push a fake option
-                    // We will append a special option here or let user type.
-                    // Appending for UI button consistency:
-                    options = [...options, { id: "custom", label: "Escribir mi propia necesidad", description: "Define tu objetivo manualmente." }];
-                    optionType = "task";
-                    break;
+                // Context Fallback logic
+                const currentModule = config.module || initialContext || "default";
 
-                case "TIME":
-                    promptText = `Entendido. Para **${config.task}**, he calculado los tiempos promedio de ejecución. Selecciona la duración que mejor se adapte a tu ritmo:`;
-                    options = TIME_ESTIMATES;
-                    optionType = "time";
-                    break;
+                // Data Lookup Helper
+                const getTaskOptions = (mod: string) => {
+                    const key = mod.toLowerCase().includes("data") ? "data-analytics"
+                        : mod.toLowerCase().includes("ai") ? "ai"
+                            : mod.toLowerCase().includes("marketing") ? "data-analytics"
+                                : "default";
+                    return COMMON_TASKS[key] || COMMON_TASKS["default"];
+                };
 
-                case "TEAM":
-                    promptText = `Para completar esto en **${config.timeframe}**, he estimado el equipo necesario.\n\n*Nota: Este equipo no es para contratación obligatoria, es para saber con cuántas personas contarías en caso de que necesites apoyo en partes del plan que no puedas hacer solo.*`;
-                    options = TEAM_SUGGESTIONS;
-                    optionType = "team";
-                    break;
+                switch (step) {
+                    case "TASK":
+                        // ELITE CONSULTANT COPY
+                        promptText = `**Análisis de Mercado Finalizado.**\nBasado en tu sector, estas son las rutas de mayor retorno de inversión (ROI) para PyMEs en 2025. ¿Hacia dónde enfocamos tu estrategia?`;
 
-                case "BUDGET":
-                    promptText = `Hablemos de inversión. He investigado dos escenarios: "Hazlo tú mismo" vs "Con Apoyo". Aquí tienes 3 estimaciones de costo para la ejecución:`;
-                    options = BUDGET_OPTIONS;
-                    optionType = "budget";
-                    break;
+                        options = getTaskOptions(contextData || currentModule);
+                        // Custom option updated: "Personalizar requerimiento específico"
+                        options = [...options, { id: "custom", label: "Personalizar requerimiento específico", description: "Define un objetivo manualmente." }];
+                        optionType = "task";
+                        break;
 
-                case "GOAL":
-                    promptText = `Para finalizar, necesito entender la visión profunda del proyecto. ¿Cuál es la finalidad última de esto?`;
-                    // Two buttons as requested
-                    options = [
-                        { id: "answer_qs", label: "Contestar preguntas guía" },
-                        { id: "gen_plan", label: "Generar plan estratégico directamente" }
-                    ];
-                    optionType = "task"; // Reusing grid/list style
-                    break;
+                    case "TIME":
+                        promptText = `**Cronograma de Ejecución Estimado.**\nLa IA ha calculado estos escenarios basándose en la complejidad técnica de **"${contextData}"** y estándares de estabilidad del sistema.`;
+                        options = TIME_ESTIMATES;
+                        optionType = "time";
+                        break;
 
-                case "GOAL_QNA":
-                    promptText = "Perfecto. Ayúdame respondiendo: ¿Qué impacto específico esperas en tus ingresos o eficiencia con este proyecto? (Responde brevemente)";
-                    options = [];
-                    break;
+                    case "TEAM":
+                        promptText = `Si buscaras apoyo para **${contextData}**, este sería el equipo sugerido (referencia):`;
+                        options = TEAM_SUGGESTIONS;
+                        optionType = "team";
+                        break;
 
-                case "SUMMARY":
-                    promptText = `Configuración Completa. He guardado tu **final_strategy_config**. Estoy listo para generar el Plan de 7 Fases.`;
-                    console.log("FINAL STRATEGY CONFIG:", config);
-                    break;
+                    case "BUDGET":
+                        promptText = `Inversión estimada para **${contextData}** personas:\n\n**1. Hazlo tú mismo** (Solo herramientas).\n**2. Apoyo Externo** (Promedios de mercado):`;
+                        options = BUDGET_OPTIONS;
+                        optionType = "budget";
+                        break;
+
+                    case "GOAL":
+                        promptText = `¿Cuál es el propósito final de este proyecto?`;
+                        options = [
+                            { id: "answer_qs", label: "Contestar preguntas guía" },
+                            { id: "gen_plan", label: "Generar plan estratégico" }
+                        ];
+                        optionType = "task";
+                        break;
+
+                    case "GOAL_QNA":
+                        promptText = "¿Qué impacto específico esperas en ingresos o eficiencia? (Sé breve)";
+                        options = [];
+                        break;
+
+                    case "SUMMARY":
+                        promptText = `¡Listo! Generando Plan Estratégico...`;
+                        console.log("FINAL CONFIG:", config);
+                        break;
+                }
+
+                const newMsgs: Message[] = [
+                    { id: `prompt-${step}`, role: "assistant", content: promptText, timestamp: new Date(), type: "text" }
+                ];
+
+                if (options.length > 0) {
+                    newMsgs.push({
+                        id: `opts-${step}`,
+                        role: "assistant",
+                        content: "",
+                        type: "ui",
+                        options: options,
+                        optionType: optionType,
+                        timestamp: new Date()
+                    });
+                }
+
+                setMessages(prev => [...prev, ...newMsgs]);
+            } catch (e) {
+                console.error("Error in triggerStep:", e);
+            } finally {
+                setIsTyping(false);
             }
-
-            const newMsgs: Message[] = [
-                { id: `prompt-${step}`, role: "assistant", content: promptText, timestamp: new Date(), type: "text" }
-            ];
-
-            if (options.length > 0) {
-                newMsgs.push({
-                    id: `opts-${step}`,
-                    role: "assistant",
-                    content: "",
-                    type: "ui",
-                    component: <WizardOptions options={options} onSelect={handleOptionSelect} type={optionType} />,
-                    timestamp: new Date()
-                });
-            }
-
-            setMessages(prev => [...prev, ...newMsgs]);
-            setIsTyping(false);
-        }, 1200);
+        }, delay);
     };
 
     // HANDLE OPTION CLICK
@@ -159,23 +167,13 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
         };
         setMessages(prev => [...prev, userMsg]);
 
-        // Special Case: "Escribir mi propia necesidad"
+        // Handle Custom Flow
         if (option.id === "custom") {
-            setIsTyping(true);
-            setTimeout(() => {
-                const promptMsg: Message = {
-                    id: Date.now().toString(),
-                    role: "assistant",
-                    content: "Entendido. Por favor, describe tu necesidad o tarea específica:",
-                    timestamp: new Date(),
-                };
-                setMessages(prev => [...prev, promptMsg]);
-                setIsTyping(false);
-            }, 600);
-            return; // Wait for text input
+            advanceWizard(option.label, wizardStep, true);
+            return;
         }
 
-        // Special Case: Goal Flow
+        // Handle Goal Flow
         if (wizardStep === "GOAL") {
             if (option.id === "answer_qs") {
                 triggerStep("GOAL_QNA");
@@ -186,15 +184,16 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
             }
         }
 
-        // 2. Update Config & Advance
-        advanceWizard(option.label, wizardStep);
+        // 2. Advance (Force slight delay to ensure UI updates first)
+        setTimeout(() => {
+            advanceWizard(option.label, wizardStep);
+        }, 100);
     };
 
     // HANDLE TEXT INPUT
     const handleSendMessage = async () => {
         if (!inputValue.trim()) return;
 
-        // 1. Add User Msg
         const userMsg: Message = {
             id: Date.now().toString(),
             role: "user",
@@ -204,59 +203,53 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
         setMessages(prev => [...prev, userMsg]);
         setInputValue("");
 
-        // Special Validation Logic as requested by User for TIME Step
+        // Time Validation UX
         if (wizardStep === "TIME") {
             setIsTyping(true);
             setTimeout(() => {
-                const validationMsg: Message = {
-                    id: `val-${Date.now()}`,
-                    role: "assistant",
-                    content: "Perfecto, ajustaremos el plan para cumplir en este plazo.",
-                    timestamp: new Date(),
-                };
+                const validationMsg: Message = { id: `val-${Date.now()}`, role: "assistant", content: `Perfecto, ajustado a "${inputValue}".`, timestamp: new Date() };
                 setMessages(prev => [...prev, validationMsg]);
                 setTimeout(() => {
                     advanceWizard(inputValue, wizardStep);
-                }, 1000);
-            }, 600);
+                }, 800);
+            }, 500);
             return;
         }
 
-        // 2. Update Config & Advance
         advanceWizard(inputValue, wizardStep);
     };
 
-    const advanceWizard = (value: string, currentStep: WizardStep) => {
-        const nextConfig = { ...config };
+    // Advance Logic
+    const advanceWizard = (value: string, currentStep: WizardStep, isCustom: boolean = false) => {
+        // Update Config
+        setConfig(prev => {
+            const next = { ...prev };
+            switch (currentStep) {
+                case "TASK": next.task = value; break;
+                case "TIME": next.timeframe = value; break;
+                case "TEAM": next.teamSize = value; break;
+                case "BUDGET": next.budget = value; break;
+                case "GOAL_QNA": next.goal = value; break;
+            }
+            return next;
+        });
+
+        if (currentStep === "TASK" && isCustom) {
+            setIsTyping(true);
+            setTimeout(() => {
+                const propmt = { id: Date.now().toString(), role: "assistant", content: "Entendido. Describe tu necesidad:", timestamp: new Date(), type: "text" } as Message;
+                setMessages(prev => [...prev, propmt]);
+                setIsTyping(false);
+            }, 500);
+            return;
+        }
 
         switch (currentStep) {
-            case "TASK":
-                nextConfig.task = value;
-                setConfig(nextConfig);
-                triggerStep("TIME");
-                break;
-            case "TIME":
-                nextConfig.timeframe = value;
-                setConfig(nextConfig);
-                triggerStep("TEAM");
-                break;
-            case "TEAM":
-                nextConfig.teamSize = value;
-                setConfig(nextConfig);
-                triggerStep("BUDGET");
-                break;
-            case "BUDGET":
-                nextConfig.budget = value;
-                setConfig(nextConfig);
-                triggerStep("GOAL");
-                break;
-            case "GOAL_QNA":
-                // Accumulate Goal info
-                nextConfig.goal = value;
-                setConfig(nextConfig);
-                // Prompt for more or finish? For now, finish per script.
-                triggerStep("SUMMARY");
-                break;
+            case "TASK": triggerStep("TIME", value); break;
+            case "TIME": triggerStep("TEAM", value); break;
+            case "TEAM": triggerStep("BUDGET", value); break;
+            case "BUDGET": triggerStep("GOAL", value); break;
+            case "GOAL_QNA": triggerStep("SUMMARY", value); break;
         }
     };
 
@@ -267,58 +260,70 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
         }
     };
 
+    const formattedContext = initialContext ? initialContext.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) : "";
+
     return (
-        <div className="flex flex-col h-full overflow-hidden w-full">
-            {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6 w-full max-w-3xl mx-auto scroll-smooth">
+        <div className="flex flex-col h-full overflow-hidden w-full relative">
+            {/* COMPACT MINIMAL HEADER */}
+            <header className="shrink-0 pt-4 pb-0 px-6 max-w-5xl mx-auto w-full text-center z-20">
+                <p className="text-blue-400/80 text-[10px] md:text-xs uppercase tracking-[0.2em] font-bold">
+                    MIPE Assistant • Fase 2
+                </p>
+                <h1 className="text-xl md:text-3xl font-medium text-white tracking-tight mt-1">
+                    {formattedContext}
+                </h1>
+            </header>
+
+            {/* Messages Area - Reduced Padding */}
+            <div className="flex-1 overflow-y-auto px-4 py-2 w-full max-w-6xl mx-auto scroll-smooth">
                 {messages.map((msg) => (
                     <div
                         key={msg.id}
-                        className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
+                        className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-center"}`}
                     >
-                        {msg.type === "ui" && msg.component ? (
-                            <div className="w-full my-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                                {msg.component}
+                        {msg.type === "ui" && msg.options ? (
+                            <div className="w-full my-3 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                                <WizardOptions
+                                    options={msg.options}
+                                    onSelect={handleOptionSelect}
+                                    type={msg.optionType}
+                                />
                             </div>
                         ) : (
                             <div
-                                className={`max-w-[85%] md:max-w-[80%] px-6 py-4 rounded-2xl text-base leading-relaxed shadow-sm ${msg.role === "user"
-                                        ? "bg-blue-600/20 border border-blue-500/30 text-blue-100 rounded-tr-sm"
-                                        : "bg-zinc-900/80 border border-white/10 text-zinc-100 rounded-tl-sm backdrop-blur-md"
+                                className={`max-w-[90%] md:max-w-[70%] px-5 py-3 rounded-2xl text-sm md:text-base leading-relaxed whitespace-pre-wrap ${msg.role === "user"
+                                        ? "bg-blue-600 text-white rounded-tr-sm shadow-md mt-4"
+                                        : "bg-transparent text-white/90 text-center font-light mt-2"
                                     }`}
                             >
-                                <div className="markdown-prose">
-                                    {msg.content.split('\n').map((line, i) => (
-                                        <p key={i} className="mb-1 last:mb-0">{line}</p>
-                                    ))}
-                                </div>
+                                {msg.content}
                             </div>
                         )}
                     </div>
                 ))}
 
                 {isTyping && (
-                    <div className="flex justify-start">
-                        <div className="bg-zinc-900/80 border border-white/10 px-4 py-3 rounded-2xl rounded-tl-sm flex items-center gap-1">
-                            <div className="w-2 h-2 rounded-full bg-blue-500/60 animate-bounce" style={{ animationDelay: "0ms" }} />
-                            <div className="w-2 h-2 rounded-full bg-blue-500/60 animate-bounce" style={{ animationDelay: "150ms" }} />
-                            <div className="w-2 h-2 rounded-full bg-blue-500/60 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    <div className="w-full flex justify-center py-4">
+                        <div className="flex gap-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "0ms" }} />
+                            <div className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "150ms" }} />
+                            <div className="w-1.5 h-1.5 rounded-full bg-white/30 animate-bounce" style={{ animationDelay: "300ms" }} />
                         </div>
                     </div>
                 )}
                 <div ref={messagesEndRef} />
             </div>
 
-            {/* Input Area */}
-            <div className="p-6 border-t border-white/5 bg-gradient-to-t from-black via-black/90 to-transparent">
-                <div className="max-w-3xl mx-auto glass rounded-2xl flex items-center p-2 focus-within:ring-2 focus-within:ring-blue-500/30 transition-all shadow-2xl">
+            {/* Input Area - Compact */}
+            <div className="shrink-0 p-4 md:p-6 bg-gradient-to-t from-black via-black/90 to-transparent pointer-events-none flex justify-center">
+                <div className="pointer-events-auto w-full max-w-2xl glass rounded-full flex items-center p-1.5 focus-within:ring-2 focus-within:ring-blue-500/30 transition-all shadow-2xl bg-zinc-900/50 border border-white/10 backdrop-blur-xl">
                     <input
                         type="text"
-                        className="flex-1 bg-transparent border-none outline-none px-4 text-lg text-white placeholder-white/20 h-12"
+                        className="flex-1 bg-transparent border-none outline-none px-5 text-base text-white placeholder-white/20 h-10"
                         placeholder={
-                            wizardStep === "TASK" ? "O escribe tu propia necesidad..." :
-                                wizardStep === "TIME" ? "Escribe un tiempo manual (ej. 3 meses)..." :
-                                    "Escribe tu respuesta..."
+                            wizardStep === "TASK" ? "Escribe tu necesidad..." :
+                                wizardStep === "TIME" ? "Tiempo manual..." :
+                                    "Responder..."
                         }
                         value={inputValue}
                         onChange={(e) => setInputValue(e.target.value)}
@@ -327,9 +332,9 @@ export default function ChatInterface({ initialContext }: ChatInterfaceProps) {
                     <button
                         onClick={handleSendMessage}
                         disabled={!inputValue.trim()}
-                        className="w-12 h-12 rounded-xl bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/20"
+                        className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white transition-colors disabled:opacity-50"
                     >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                             <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
                         </svg>
                     </button>
